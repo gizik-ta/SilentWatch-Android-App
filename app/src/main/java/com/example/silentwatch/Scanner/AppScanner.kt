@@ -9,16 +9,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import com.example.silentwatch.DB.AppInfoDao
+
 
 class AppScanner {
 
-    suspend fun scan(context: Context): List<AppInfo> = coroutineScope {
+    suspend fun scan(context: Context, dao: AppInfoDao): Unit = coroutineScope {
 
         val pm = context.packageManager
 
         val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
 
-        installedApps
+        val installedAppsInformation = installedApps
             .filter { app ->
                 val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                 val isUpdatedSystem = (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
@@ -45,27 +47,43 @@ class AppScanner {
 
                     val lastUpdateTime = packageInfo?.lastUpdateTime ?: 0L
 
-                    val description = try {
-                        RetrofitInstance.api.getDescription(packageName).description
-                    } catch (e: Exception) {
-                        "No description"
-                    }
-
-                    val dangerRate = rate(packageName, permissions)
-                    val dangerCategory = categoryDefinition(dangerRate)
-
                     AppInfo(
                         packageName = packageName,
                         appName = appName,
                         permissions = permissions,
-                        description = description,
                         lastUpdateTime = lastUpdateTime,
-                        dangerRate = dangerRate,
-                        dangerCategory = dangerCategory
                     )
                 }
             }
             .awaitAll()
+
+        for(app in installedAppsInformation){
+            dao.upsertAppInfo(app)
+        }
+    }
+
+    suspend fun getDescriptions(
+        apps: List<AppInfo>,
+        dao: AppInfoDao
+    ) {
+        val packageNames = apps.joinToString(",") { it.packageName }
+
+        val response = try {
+            RetrofitInstance.api.getDescription(packageNames)
+        } catch (e: Exception) {
+            return
+        }
+
+        val descriptionsMap = response.result
+
+        for (app in apps) {
+            val description = descriptionsMap[app.packageName]?.description
+                ?: "No description"
+
+            val updatedApp = app.copy(description = description)
+
+            dao.upsertAppInfo(updatedApp)
+        }
     }
 
     //This is a temp function. Add the CHAT GTP API request later.
