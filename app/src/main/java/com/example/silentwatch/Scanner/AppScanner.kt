@@ -2,14 +2,15 @@ package com.example.silentwatch.Scanner
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.os.Build
 import com.example.silentwatch.API.RetrofitInstance
 import com.example.silentwatch.DB.AppInfoDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-
 
 class AppScanner {
 
@@ -33,21 +34,32 @@ class AppScanner {
 
                     val packageName = app.packageName
                     val appName = app.loadLabel(pm).toString()
+                    val (sourceName, sourcePackageName, isTrustedSource) = resolveInstallSource(
+                        packageManager = pm,
+                        packageName = packageName,
+                    )
 
-                    val packageInfo = try {
-                        pm.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
-                    } catch (e: Exception) {
-                        null
-                    }
+                    val packageInfo = getPackageInfoCompat(
+                        packageManager = pm,
+                        packageName = packageName,
+                    )
 
                     val permissions = packageInfo
                         ?.requestedPermissions
-                        ?.toList()
+                        ?.map { permissionName ->
+                            buildPermissionInfo(
+                                permissionName = permissionName,
+                                isGrantedByUser = pm.checkPermission(
+                                    permissionName,
+                                    packageName,
+                                ) == PackageManager.PERMISSION_GRANTED,
+                            )
+                        }
                         ?: emptyList()
 
                     val lastUpdateTime = packageInfo?.lastUpdateTime ?: 0L
-                    val dangerRate = rate(permissions)
-                    val dangerCategory = categoryDefinition(dangerRate)
+                    val dangerRate = calculateAppDangerRate(permissions)
+                    val dangerCategory = dangerCategoryForRate(dangerRate)
 
                     AppInfo(
                         packageName = packageName,
@@ -55,6 +67,9 @@ class AppScanner {
                         permissions = permissions,
                         lastUpdateTime = lastUpdateTime,
                         lastCheckedTime = checkedAt,
+                        sourceName = sourceName,
+                        sourcePackageName = sourcePackageName,
+                        isTrustedSource = isTrustedSource,
                         dangerRate = dangerRate,
                         dangerCategory = dangerCategory,
                     )
@@ -83,37 +98,126 @@ class AppScanner {
         }
 
         for (app in apps) {
-            val description = descriptionsMap[app.packageName]?.description
-                ?: "No description"
+            val responseItem = descriptionsMap[app.packageName]
+            val updatedPermissions = app.permissions.map { permission ->
+                refreshPermissionInsight(
+                    permission = permission,
+                    apiInsight = responseItem?.permissions?.get(permission.name),
+                )
+            }
+            val recalculatedDangerRate = calculateAppDangerRate(updatedPermissions)
 
-            val updatedApp = app.copy(description = description)
+            val updatedApp = app.copy(
+                description = responseItem?.description
+                    ?.takeIf { description -> description.isNotBlank() }
+                    ?: "No description.",
+                permissions = updatedPermissions,
+                dangerRate = recalculatedDangerRate,
+                dangerCategory = dangerCategoryForRate(recalculatedDangerRate),
+            )
 
             dao.upsertAppInfo(updatedApp)
         }
     }
 
-    //This is a temp function. Add the CHAT GTP API request later.
-    private fun rate(permissions: List<String>): Int {
-        var score = 0
-
-        permissions.forEach {
-            when {
-                it.contains("CAMERA") -> score += 10
-                it.contains("LOCATION") -> score += 15
-                it.contains("READ_CONTACTS") -> score += 20
-                it.contains("RECORD_AUDIO") -> score += 15
-                it.contains("SMS") -> score += 25
+    fun refreshAppSnapshot(
+        context: Context,
+        app: AppInfo,
+    ): AppInfo {
+        val packageManager = context.packageManager
+        val packageInfo = getPackageInfoCompat(
+            packageManager = packageManager,
+            packageName = app.packageName,
+        ) ?: return app
+        val (sourceName, sourcePackageName, isTrustedSource) = resolveInstallSource(
+            packageManager = packageManager,
+            packageName = app.packageName,
+        )
+        val refreshedPermissions = packageInfo.requestedPermissions
+            ?.map { permissionName ->
+                val existingPermission = app.permissions.firstOrNull { permission ->
+                    permission.name == permissionName
+                }
+                (existingPermission ?: buildPermissionInfo(
+                    permissionName = permissionName,
+                    isGrantedByUser = true,
+                )).copy(
+                    isGrantedByUser = packageManager.checkPermission(
+                        permissionName,
+                        app.packageName,
+                    ) == PackageManager.PERMISSION_GRANTED,
+                )
             }
-        }
+            ?: emptyList()
+        val refreshedDangerRate = calculateAppDangerRate(refreshedPermissions)
+        val refreshedName = runCatching {
+            val applicationInfo = packageManager.getApplicationInfo(app.packageName, 0)
+            packageManager.getApplicationLabel(applicationInfo).toString()
+        }.getOrElse { app.appName ?: app.packageName }
 
-        return score.coerceIn(0, 100)
+        return app.copy(
+            appName = refreshedName,
+            permissions = refreshedPermissions,
+            lastUpdateTime = packageInfo.lastUpdateTime,
+            sourceName = sourceName,
+            sourcePackageName = sourcePackageName,
+            isTrustedSource = isTrustedSource,
+            dangerRate = refreshedDangerRate,
+            dangerCategory = dangerCategoryForRate(refreshedDangerRate),
+        )
     }
 
-    private fun categoryDefinition(dangerRate: Int): String {
-        return when {
-            dangerRate < 33 -> "Low"
-            dangerRate in 33..66 -> "Medium"
-            else -> "High"
+    private fun resolveInstallSource(
+        packageManager: PackageManager,
+        packageName: String,
+    ): Triple<String, String?, Boolean> {
+        val installerPackageName = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                packageManager.getInstallSourceInfo(packageName).let { installSourceInfo ->
+                    installSourceInfo.installingPackageName
+                        ?: installSourceInfo.initiatingPackageName
+                        ?: installSourceInfo.originatingPackageName
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getInstallerPackageName(packageName)
+            }
+        }.getOrNull()
+
+        if (installerPackageName.isNullOrBlank()) {
+            return Triple("Unknown source", null, false)
         }
+
+        if (installerPackageName == GOOGLE_PLAY_PACKAGE_NAME) {
+            return Triple("Google Play Store", installerPackageName, true)
+        }
+
+        val installerLabel = runCatching {
+            val appInfo = packageManager.getApplicationInfo(installerPackageName, 0)
+            packageManager.getApplicationLabel(appInfo).toString()
+        }.getOrDefault(installerPackageName)
+
+        return Triple(installerLabel, installerPackageName, false)
+    }
+
+    private fun getPackageInfoCompat(
+        packageManager: PackageManager,
+        packageName: String,
+    ): PackageInfo? {
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong()),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
+            }
+        }.getOrNull()
+    }
+
+    private companion object {
+        const val GOOGLE_PLAY_PACKAGE_NAME = "com.android.vending"
     }
 }

@@ -38,6 +38,7 @@ enum class LearningOverlayState {
 enum class AppScreen {
     Dashboard,
     Apps,
+    Details,
 }
 
 enum class RiskLevelFilter(@StringRes val labelResId: Int) {
@@ -111,6 +112,8 @@ data class MainUiState(
     val lastScanTimestamp: Long = 0L,
     val searchQuery: String = "",
     val scannedApps: List<AppInfo> = emptyList(),
+    val selectedAppPackageName: String? = null,
+    val activePermissionInfoName: String? = null,
     val isFilterSheetVisible: Boolean = false,
     val selectedRiskFilters: Set<RiskLevelFilter> = emptySet(),
     val selectedPermissionFilters: Set<PermissionFilter> = emptySet(),

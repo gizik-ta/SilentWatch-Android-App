@@ -90,4 +90,22 @@
     <string name="apps_filter_accessibility">Accessibility</string>
     <string name="apps_filter_installation">Installation</string>
     <string name="apps_filter_usage_stats">Usage Stats</string>
+    <string name="details_screen_title">Details</string>
+    <string name="details_missing_app">This app is no longer available in the saved results. Run a new scan and open it again.</string>
+    <string name="details_source_label">Source: %1$s</string>
+    <string name="details_last_update_label">Last update: %1$s</string>
+    <string name="details_description_title">Description</string>
+    <string name="details_description_fallback">No description.</string>
+    <string name="details_permissions_allowed">Accepted permissions</string>
+    <string name="details_permissions_denied">Rejected permissions</string>
+    <string name="details_permissions_allowed_empty">This app does not currently have granted permissions in the saved data.</string>
+    <string name="details_permissions_denied_empty">There are no denied permissions recorded for this app.</string>
+    <string name="details_permission_active_status">Counts in danger rating</string>
+    <string name="details_permission_trusted_status">Ignored in danger rating</string>
+    <string name="details_permission_denied_status">Denied by user</string>
+    <string name="details_permission_danger_score">Danger score: %1$d/100</string>
+    <string name="details_permission_dialog_close">Close</string>
+    <string name="details_source_dialog_title">Source warning</string>
+    <string name="details_source_unknown_explanation">This app was installed from %1$s. Because the source is not trusted, the app could be modified or contain harmful code.</string>
+    <string name="details_source_trusted_explanation">This app was installed from %1$s. This source is treated as trusted because it is Google Play Store.</string>
 </resources>

@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,10 +40,17 @@ fun LearningOverlay(
     onRetryLearning: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val overlayInteractionSource = remember { MutableInteractionSource() }
+
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = overlayInteractionSource,
+                indication = null,
+                onClick = {},
+            )
             .padding(20.dp),
         contentAlignment = Alignment.Center,
     ) {

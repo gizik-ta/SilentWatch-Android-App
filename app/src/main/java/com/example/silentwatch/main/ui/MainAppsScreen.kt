@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -68,6 +69,7 @@ fun AppsScreen(
     onClearAllFilters: () -> Unit,
     onRiskFilterClick: (RiskLevelFilter) -> Unit,
     onPermissionFilterClick: (PermissionFilter) -> Unit,
+    onAppClick: (String) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -172,6 +174,7 @@ fun AppsScreen(
                         AppCard(
                             app = app,
                             lastScanTimestamp = uiState.lastScanTimestamp,
+                            onClick = { onAppClick(app.packageName) },
                         )
                     }
                 }
@@ -181,7 +184,7 @@ fun AppsScreen(
 }
 
 @Composable
-private fun RoundNavigationButton(
+fun RoundNavigationButton(
     symbol: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -386,7 +389,7 @@ private fun ClearFiltersButton(
 private fun FilterChip(
     text: String,
     selected: Boolean,
-    accent: androidx.compose.ui.graphics.Color,
+    accent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -438,7 +441,7 @@ private fun FilterChip(
 @Composable
 private fun SelectionIndicator(
     selected: Boolean,
-    accent: androidx.compose.ui.graphics.Color,
+    accent: Color,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(5.dp)
@@ -462,7 +465,7 @@ private fun SelectionIndicator(
     ) {
         if (selected) {
             Text(
-                text = "✓",
+                text = CHECK_SYMBOL,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onPrimary,
             )
@@ -474,6 +477,7 @@ private fun SelectionIndicator(
 private fun AppCard(
     app: AppInfo,
     lastScanTimestamp: Long,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(24.dp)
@@ -496,6 +500,7 @@ private fun AppCard(
             .shadow(10.dp, shape)
             .clip(shape)
             .background(gradient)
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         Row(
@@ -529,8 +534,12 @@ private fun AppCard(
 }
 
 @Composable
-private fun AppIconBadge(
+fun AppIconBadge(
     packageName: String,
+    contentDescription: String? = packageName,
+    shape: RoundedCornerShape = RoundedCornerShape(14.dp),
+    boxSize: Int = 44,
+    fallbackColorOverride: Color? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -553,8 +562,9 @@ private fun AppIconBadge(
             }
         }
     }
-    val shape = RoundedCornerShape(14.dp)
-    val fallbackColor = if (MaterialTheme.colorScheme.secondaryContainer == MaterialTheme.colorScheme.surface) {
+    val fallbackColor = fallbackColorOverride ?: if (
+        MaterialTheme.colorScheme.secondaryContainer == MaterialTheme.colorScheme.surface
+    ) {
         AccentPeach
     } else {
         MaterialTheme.colorScheme.secondaryContainer
@@ -562,7 +572,7 @@ private fun AppIconBadge(
 
     Box(
         modifier = modifier
-            .size(44.dp)
+            .size(boxSize.dp)
             .shadow(6.dp, shape)
             .clip(shape)
             .background(fallbackColor),
@@ -572,7 +582,7 @@ private fun AppIconBadge(
         if (resolvedIcon != null) {
             Image(
                 bitmap = resolvedIcon,
-                contentDescription = packageName,
+                contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -657,6 +667,7 @@ private fun AppsScreenPreview() {
             onClearAllFilters = {},
             onRiskFilterClick = {},
             onPermissionFilterClick = {},
+            onAppClick = {},
             onSearchQueryChange = {},
         )
     }

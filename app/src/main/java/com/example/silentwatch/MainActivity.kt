@@ -34,31 +34,60 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                if (uiState.currentScreen == AppScreen.Apps) {
-                    AppsScreen(
-                        uiState = uiState,
-                        onBackClick = viewModel::closeAppsScreen,
-                        onFilterButtonClick = viewModel::toggleFilterSheet,
-                        onClearAllFilters = viewModel::clearAllFilters,
-                        onRiskFilterClick = viewModel::toggleRiskFilter,
-                        onPermissionFilterClick = viewModel::togglePermissionFilter,
-                        onSearchQueryChange = viewModel::updateSearchQuery,
-                    )
-                } else {
-                    MainScreen(
-                        uiState = uiState,
-                        onScanClick = viewModel::toggleScan,
-                        onOpenLearning = viewModel::openLearning,
-                        onOpenApps = viewModel::openAppsScreen,
-                        onOpenRiskApps = viewModel::openAppsScreenWithRiskFilter,
-                        onCloseLearning = viewModel::closeLearning,
-                        onTutorialBack = viewModel::previousTutorialStep,
-                        onTutorialNext = viewModel::nextTutorialStep,
-                        onQuizAnswerSelected = viewModel::selectQuizAnswer,
-                        onQuizBack = viewModel::previousQuizQuestion,
-                        onQuizNext = viewModel::nextQuizQuestion,
-                        onRetryLearning = viewModel::retryLearning,
-                    )
+                BackHandler(
+                    enabled = uiState.currentScreen == AppScreen.Details &&
+                        uiState.activePermissionInfoName != null,
+                ) {
+                    viewModel.hidePermissionInfo()
+                }
+
+                BackHandler(
+                    enabled = uiState.currentScreen == AppScreen.Details &&
+                        uiState.activePermissionInfoName == null,
+                ) {
+                    viewModel.closeAppDetails()
+                }
+
+                when (uiState.currentScreen) {
+                    AppScreen.Apps -> {
+                        AppsScreen(
+                            uiState = uiState,
+                            onBackClick = viewModel::closeAppsScreen,
+                            onFilterButtonClick = viewModel::toggleFilterSheet,
+                            onClearAllFilters = viewModel::clearAllFilters,
+                            onRiskFilterClick = viewModel::toggleRiskFilter,
+                            onPermissionFilterClick = viewModel::togglePermissionFilter,
+                            onAppClick = viewModel::openAppDetails,
+                            onSearchQueryChange = viewModel::updateSearchQuery,
+                        )
+                    }
+
+                    AppScreen.Details -> {
+                        AppDetailsScreen(
+                            uiState = uiState,
+                            onBackClick = viewModel::closeAppDetails,
+                            onPermissionTrustToggle = viewModel::togglePermissionTrust,
+                            onPermissionInfoClick = viewModel::showPermissionInfo,
+                            onDismissPermissionInfo = viewModel::hidePermissionInfo,
+                        )
+                    }
+
+                    AppScreen.Dashboard -> {
+                        MainScreen(
+                            uiState = uiState,
+                            onScanClick = viewModel::toggleScan,
+                            onOpenLearning = viewModel::openLearning,
+                            onOpenApps = viewModel::openAppsScreen,
+                            onOpenRiskApps = viewModel::openAppsScreenWithRiskFilter,
+                            onCloseLearning = viewModel::closeLearning,
+                            onTutorialBack = viewModel::previousTutorialStep,
+                            onTutorialNext = viewModel::nextTutorialStep,
+                            onQuizAnswerSelected = viewModel::selectQuizAnswer,
+                            onQuizBack = viewModel::previousQuizQuestion,
+                            onQuizNext = viewModel::nextQuizQuestion,
+                            onRetryLearning = viewModel::retryLearning,
+                        )
+                    }
                 }
             }
         }

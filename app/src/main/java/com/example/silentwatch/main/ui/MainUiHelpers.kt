@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.res.stringResource
 import com.example.silentwatch.Scanner.AppInfo
+import com.example.silentwatch.Scanner.AppPermissionInfo
 import com.example.silentwatch.ui.theme.AccentBlue
 import com.example.silentwatch.ui.theme.AccentPeach
 import com.example.silentwatch.ui.theme.LearningGold
@@ -28,6 +29,8 @@ const val SAD_EMOJI = "\uD83D\uDE15"
 const val SEARCH_EMOJI = "\uD83D\uDD0D"
 const val FILTER_SYMBOL = "\u2630"
 const val BACK_SYMBOL = "\u2190"
+const val CHECK_SYMBOL = "\u2713"
+const val INFO_SYMBOL = "i"
 
 val appIconCache = LruCache<String, ImageBitmap>(64)
 
@@ -224,6 +227,45 @@ fun learningButtonEmoji(badge: LearningBadge): String {
     }
 }
 
+@Composable
+fun detailsCardBrush(): Brush {
+    return if (isSystemInDarkTheme()) {
+        Brush.linearGradient(
+            listOf(
+                Color(0xFF24285A),
+                Color(0xFF3F3B75),
+                Color(0xFF5C4D7A),
+            ),
+        )
+    } else {
+        Brush.linearGradient(
+            listOf(
+                Color(0xFF5A5486),
+                Color(0xFF6C5A8B),
+                Color(0xFF7D6A92),
+            ),
+        )
+    }
+}
+
+@Composable
+fun permissionCardBrush(accent: Color): Brush {
+    val startColor = if (isSystemInDarkTheme()) {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f)
+    } else {
+        PaleRose
+    }
+    val endColor = if (isSystemInDarkTheme()) {
+        accent.copy(alpha = 0.8f)
+    } else {
+        accent
+    }
+
+    return Brush.horizontalGradient(
+        colors = listOf(startColor, endColor),
+    )
+}
+
 fun learningButtonAccent(badge: LearningBadge): Color {
     return when (badge) {
         LearningBadge.NotStarted -> AccentBlue
@@ -260,6 +302,17 @@ fun selectedQuizAnswer(uiState: MainUiState): Int {
     }
 }
 
+fun selectedApp(uiState: MainUiState): AppInfo? {
+    val packageName = uiState.selectedAppPackageName ?: return null
+    return uiState.scannedApps.firstOrNull { app -> app.packageName == packageName }
+}
+
+fun activePermissionInfo(uiState: MainUiState): AppPermissionInfo? {
+    val permissionName = uiState.activePermissionInfoName ?: return null
+    val app = selectedApp(uiState) ?: return null
+    return app.permissions.firstOrNull { permission -> permission.name == permissionName }
+}
+
 fun filteredApps(uiState: MainUiState): List<AppInfo> {
     val query = uiState.searchQuery.trim()
     return uiState.scannedApps.filter { app ->
@@ -276,7 +329,7 @@ fun filteredApps(uiState: MainUiState): List<AppInfo> {
 }
 
 fun AppInfo.toRiskLevelFilter(): RiskLevelFilter {
-    val rate = dangerRate ?: 0
+    val rate = effectiveDangerRate()
     return when {
         rate >= 67 -> RiskLevelFilter.High
         rate >= 33 -> RiskLevelFilter.Medium
@@ -300,12 +353,15 @@ fun AppInfo.matchesSearchQuery(query: String): Boolean {
 }
 
 fun AppInfo.matchesPermissionFilter(filter: PermissionFilter): Boolean {
-    val declaredPermissions = permissions.orEmpty()
-    return declaredPermissions.any { permission ->
+    return permissions.any { permission ->
         filter.keywords.any { keyword ->
-            permission.contains(keyword, ignoreCase = true)
+            permission.name.contains(keyword, ignoreCase = true)
         }
     }
+}
+
+fun AppInfo.effectiveDangerRate(): Int {
+    return dangerRate ?: 0
 }
 
 @Composable
@@ -325,6 +381,10 @@ fun appDangerAccent(dangerRate: Int?): Color {
     }
 }
 
+fun permissionDangerAccent(dangerRate: Int): Color {
+    return appDangerAccent(dangerRate)
+}
+
 fun formatLastChecked(lastScanTimestamp: Long): String {
     if (lastScanTimestamp <= 0L) {
         return "--"
@@ -332,4 +392,19 @@ fun formatLastChecked(lastScanTimestamp: Long): String {
 
     val formatter = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
     return formatter.format(Date(lastScanTimestamp))
+}
+
+fun formatLastUpdated(lastUpdateTime: Long): String {
+    return formatLastChecked(lastUpdateTime)
+}
+
+fun permissionDisplayName(permissionName: String): String {
+    return permissionName
+        .substringAfterLast('.')
+        .split('_')
+        .filter { token -> token.isNotBlank() }
+        .joinToString(" ") { token ->
+            token.lowercase(Locale.getDefault())
+                .replaceFirstChar { char -> char.titlecase(Locale.getDefault()) }
+        }
 }

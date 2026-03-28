@@ -12,13 +12,17 @@ import androidx.room.Room
 import com.example.silentwatch.DB.AppInfoDataBase
 import com.example.silentwatch.Scanner.AppInfo
 import com.example.silentwatch.Scanner.AppScanner
+import com.example.silentwatch.Scanner.calculateAppDangerRate
+import com.example.silentwatch.Scanner.dangerCategoryForRate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 private data class ScanSummary(
@@ -38,6 +42,7 @@ class MainViewModel(
         "silent_watch.db",
     ).addMigrations(
         AppInfoDataBase.MIGRATION_1_2,
+        AppInfoDataBase.MIGRATION_2_3,
     ).build()
 
     private val dao = database.dao()
@@ -70,6 +75,8 @@ class MainViewModel(
                 currentScreen = AppScreen.Apps,
                 searchQuery = "",
                 isFilterSheetVisible = false,
+                selectedAppPackageName = null,
+                activePermissionInfoName = null,
             )
         }
     }
@@ -82,6 +89,8 @@ class MainViewModel(
                 isFilterSheetVisible = false,
                 selectedRiskFilters = setOf(filter),
                 selectedPermissionFilters = emptySet(),
+                selectedAppPackageName = null,
+                activePermissionInfoName = null,
             )
         }
     }
@@ -92,6 +101,28 @@ class MainViewModel(
                 currentScreen = AppScreen.Dashboard,
                 searchQuery = "",
                 isFilterSheetVisible = false,
+                selectedAppPackageName = null,
+                activePermissionInfoName = null,
+            )
+        }
+    }
+
+    fun openAppDetails(packageName: String) {
+        _uiState.update { currentState ->
+            currentState.copy(
+                currentScreen = AppScreen.Details,
+                selectedAppPackageName = packageName,
+                activePermissionInfoName = null,
+                isFilterSheetVisible = false,
+            )
+        }
+    }
+
+    fun closeAppDetails() {
+        _uiState.update { currentState ->
+            currentState.copy(
+                currentScreen = AppScreen.Apps,
+                activePermissionInfoName = null,
             )
         }
     }
@@ -113,6 +144,18 @@ class MainViewModel(
     fun hideFilterSheet() {
         _uiState.update { currentState ->
             currentState.copy(isFilterSheetVisible = false)
+        }
+    }
+
+    fun showPermissionInfo(permissionName: String) {
+        _uiState.update { currentState ->
+            currentState.copy(activePermissionInfoName = permissionName)
+        }
+    }
+
+    fun hidePermissionInfo() {
+        _uiState.update { currentState ->
+            currentState.copy(activePermissionInfoName = null)
         }
     }
 
@@ -138,6 +181,46 @@ class MainViewModel(
                 selectedRiskFilters = emptySet(),
                 selectedPermissionFilters = emptySet(),
             )
+        }
+    }
+
+    fun togglePermissionTrust(permissionName: String) {
+        val currentState = _uiState.value
+        val selectedPackageName = currentState.selectedAppPackageName ?: return
+        val selectedApp = currentState.scannedApps.firstOrNull { app ->
+            app.packageName == selectedPackageName
+        } ?: return
+
+        val updatedPermissions = selectedApp.permissions.map { permission ->
+            if (permission.name == permissionName) {
+                permission.copy(isTrustedByUser = !permission.isTrustedByUser)
+            } else {
+                permission
+            }
+        }
+        val updatedDangerRate = calculateAppDangerRate(updatedPermissions)
+        val updatedApp = selectedApp.copy(
+            permissions = updatedPermissions,
+            dangerRate = updatedDangerRate,
+            dangerCategory = dangerCategoryForRate(updatedDangerRate),
+        )
+        val updatedApps = currentState.scannedApps.map { app ->
+            if (app.packageName == selectedPackageName) {
+                updatedApp
+            } else {
+                app
+            }
+        }
+
+        applySavedApps(
+            apps = updatedApps,
+            scanState = if (updatedApps.isEmpty()) ScanState.Idle else ScanState.Completed,
+            lastScanTimestamp = currentState.lastScanTimestamp,
+            scanMessageResId = currentState.scanMessageResId,
+        )
+
+        viewModelScope.launch {
+            dao.upsertAppInfo(updatedApp)
         }
     }
 
@@ -276,21 +359,12 @@ class MainViewModel(
                 val scanTimestamp = savedApps.maxOfOrNull { it.lastCheckedTime }
                     ?: System.currentTimeMillis()
                 persistLastScanTimestamp(scanTimestamp)
-                val summary = savedApps.toScanSummary()
-
-                _uiState.update { currentState ->
-                    currentState.copy(
-                        scanState = ScanState.Completed,
-                        healthIndex = summary.healthIndex,
-                        highRiskCount = summary.highRiskCount,
-                        mediumRiskCount = summary.mediumRiskCount,
-                        lowRiskCount = summary.lowRiskCount,
-                        savedAppsCount = savedApps.size,
-                        lastScanTimestamp = scanTimestamp,
-                        scannedApps = savedApps,
-                        scanMessageResId = null,
-                    )
-                }
+                applySavedApps(
+                    apps = savedApps,
+                    scanState = ScanState.Completed,
+                    lastScanTimestamp = scanTimestamp,
+                    scanMessageResId = null,
+                )
             } catch (_: CancellationException) {
                 // The user stopped scanning, so we keep the state from stopScan().
             } catch (_: Exception) {
@@ -412,21 +486,23 @@ class MainViewModel(
                 return@launch
             }
 
-            val summary = savedApps.toScanSummary()
-            val restoredLastScanTimestamp = savedApps.maxOfOrNull { it.lastCheckedTime }
-                ?: persistedLastScanTimestamp
-            _uiState.update { currentState ->
-                currentState.copy(
-                    scanState = ScanState.Completed,
-                    healthIndex = summary.healthIndex,
-                    highRiskCount = summary.highRiskCount,
-                    mediumRiskCount = summary.mediumRiskCount,
-                    lowRiskCount = summary.lowRiskCount,
-                    savedAppsCount = savedApps.size,
-                    lastScanTimestamp = restoredLastScanTimestamp,
-                    scannedApps = savedApps,
-                )
+            val refreshedApps = withContext(Dispatchers.IO) {
+                savedApps.map { app ->
+                    scanner.refreshAppSnapshot(getApplication(), app)
+                }
             }
+            refreshedApps.forEach { app ->
+                dao.upsertAppInfo(app)
+            }
+
+            val restoredLastScanTimestamp = refreshedApps.maxOfOrNull { it.lastCheckedTime }
+                ?: persistedLastScanTimestamp
+            applySavedApps(
+                apps = refreshedApps,
+                scanState = ScanState.Completed,
+                lastScanTimestamp = restoredLastScanTimestamp,
+                scanMessageResId = null,
+            )
         }
     }
 
@@ -499,6 +575,56 @@ class MainViewModel(
             lowRiskCount = lowRiskCount,
             healthIndex = healthIndex,
         )
+    }
+
+    private fun applySavedApps(
+        apps: List<AppInfo>,
+        scanState: ScanState,
+        lastScanTimestamp: Long,
+        scanMessageResId: Int?,
+    ) {
+        val summary = apps.toScanSummary()
+
+        _uiState.update { currentState ->
+            val selectedPackageName = currentState.selectedAppPackageName
+                ?.takeIf { packageName ->
+                    apps.any { app -> app.packageName == packageName }
+                }
+            val activePermissionInfoName = if (selectedPackageName == null) {
+                null
+            } else {
+                currentState.activePermissionInfoName?.takeIf { permissionName ->
+                    val selectedApp = apps.firstOrNull { app ->
+                        app.packageName == selectedPackageName
+                    }
+                    selectedApp?.permissions?.any { permission ->
+                        permission.name == permissionName
+                    } ?: false
+                }
+            }
+
+            currentState.copy(
+                currentScreen = if (
+                    currentState.currentScreen == AppScreen.Details &&
+                    selectedPackageName == null
+                ) {
+                    AppScreen.Apps
+                } else {
+                    currentState.currentScreen
+                },
+                scanState = scanState,
+                healthIndex = summary.healthIndex,
+                highRiskCount = summary.highRiskCount,
+                mediumRiskCount = summary.mediumRiskCount,
+                lowRiskCount = summary.lowRiskCount,
+                savedAppsCount = apps.size,
+                lastScanTimestamp = lastScanTimestamp,
+                scannedApps = apps,
+                selectedAppPackageName = selectedPackageName,
+                activePermissionInfoName = activePermissionInfoName,
+                scanMessageResId = scanMessageResId,
+            )
+        }
     }
 
     private companion object {
