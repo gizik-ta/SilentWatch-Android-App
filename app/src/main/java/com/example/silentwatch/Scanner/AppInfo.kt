@@ -9,6 +9,7 @@ data class AppInfo(
     val description: String? = null,
     val permissions: List<String>? = null,
     val lastUpdateTime: Long = 0,
+    val lastCheckedTime: Long = 0,
     val dangerRate: Int? = null,
     val dangerCategory: String? = null,
     @PrimaryKey(autoGenerate = false)

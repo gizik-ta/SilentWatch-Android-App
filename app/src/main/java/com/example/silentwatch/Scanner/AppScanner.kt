@@ -1,22 +1,22 @@
-package com.example.silentwatch.scanner
+package com.example.silentwatch.Scanner
 
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import com.example.silentwatch.API.RetrofitInstance
-import com.example.silentwatch.Scanner.AppInfo
+import com.example.silentwatch.DB.AppInfoDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import com.example.silentwatch.DB.AppInfoDao
 
 
 class AppScanner {
 
-    suspend fun scan(context: Context, dao: AppInfoDao): Unit = coroutineScope {
+    suspend fun scan(context: Context, dao: AppInfoDao): List<AppInfo> = coroutineScope {
 
         val pm = context.packageManager
+        val checkedAt = System.currentTimeMillis()
 
         val installedApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
 
@@ -25,7 +25,7 @@ class AppScanner {
                 val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                 val isUpdatedSystem = (app.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
 
-                !isSystem || isUpdatedSystem
+                !isSystem && !isUpdatedSystem
             }
             .map { app ->
 
@@ -46,20 +46,27 @@ class AppScanner {
                         ?: emptyList()
 
                     val lastUpdateTime = packageInfo?.lastUpdateTime ?: 0L
+                    val dangerRate = rate(permissions)
+                    val dangerCategory = categoryDefinition(dangerRate)
 
                     AppInfo(
                         packageName = packageName,
                         appName = appName,
                         permissions = permissions,
                         lastUpdateTime = lastUpdateTime,
+                        lastCheckedTime = checkedAt,
+                        dangerRate = dangerRate,
+                        dangerCategory = dangerCategory,
                     )
                 }
             }
             .awaitAll()
 
-        for(app in installedAppsInformation){
+        for (app in installedAppsInformation) {
             dao.upsertAppInfo(app)
         }
+
+        installedAppsInformation
     }
 
     suspend fun getDescriptions(
@@ -68,13 +75,12 @@ class AppScanner {
     ) {
         val packageNames = apps.joinToString(",") { it.packageName }
 
-        val response = try {
+        val descriptionsMap = try {
             RetrofitInstance.api.getDescription(packageNames)
+                .result
         } catch (e: Exception) {
-            return
+            emptyMap()
         }
-
-        val descriptionsMap = response.result
 
         for (app in apps) {
             val description = descriptionsMap[app.packageName]?.description
@@ -87,7 +93,7 @@ class AppScanner {
     }
 
     //This is a temp function. Add the CHAT GTP API request later.
-    private fun rate(packageName: String, permissions: List<String>): Int {
+    private fun rate(permissions: List<String>): Int {
         var score = 0
 
         permissions.forEach {

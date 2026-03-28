@@ -1,7 +1,7 @@
 package com.example.silentwatch.API
 
 import com.example.silentwatch.API.AppDescriptionResponse
-import com.example.silentwatch.DescriptionResponse
+import com.example.silentwatch.Scanner.DescriptionResponse
 import retrofit2.http.GET
 import retrofit2.http.Query
 
